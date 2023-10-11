@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: cluster-git
+spec:
+  generators:
+  - matrix:
+      generators:
+        - git:
+            repoURL: git@github.com:chunho6905/rosa-prod.git  
+            revision: HEAD
+            directories:
+            - path: redhat/*/*/*
+        - clusters:
+            selector:
+              matchExpressions:
+              - key: chunhkim
+                operator: In
+                values:
+                - dev
+                - prod
+  template:
+    metadata:
+      name: '{{path[1]}}-{{metadata.labels.stage}}-{{path.basename}}'
+    spec:
+      project: '{{metadata.labels.stage}}'
+      source:
+        helm:
+          valueFiles:
+          - values-{{metadata.labels.stage}}.yaml
+        repoURL: git@github.com:chunho6905/rosa-prod.git 
+        targetRevision: HEAD
+        path: '{{path}}'
+      destination:
+        server: '{{server}}'
+        namespace: '{{path[1]}}-{{metadata.labels.stage}}-{{path[2]}}'
