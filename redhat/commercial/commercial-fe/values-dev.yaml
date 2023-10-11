@@ -1,0 +1,97 @@
+information:
+ stage: dev
+ owner: commercial
+ application: customer
+ service: fe
+ url: customer-dev.sandbox497.opentlc.com
+ Severity: S1
+modules:
+ ingress: true 
+ nlb: false 
+ autoscaling: true
+ volume: false
+ envdata: false
+ service: false 
+ bluegreen: true 
+
+containers:
+  imageTag: latest
+  cpu: 256m
+  memory: 512Mi
+  replicaCount: 1
+  port: 80
+
+healthcheck:
+  http:
+    enable: true 
+    livenessProbe:
+      path: /
+    readinessProbe:
+      path: /
+    startupProbe:
+      path: /
+  tcp: 
+    enable: false 
+
+service:
+  port: 80
+
+ingress:
+  type:
+    default:
+      enable: true 
+  greenHosts:
+    path: /
+  blueHosts:
+    path: /
+
+nlb:
+  bluePort: 443
+  greenPort: 7081
+
+autoscaling:
+  minReplicas: 1
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 50
+
+envdata: {
+  key1: value,
+  key2: value
+}
+
+deploy:
+  ############ ALM 영역 ############
+  strategy:
+    autoPromotionEnabled: true
+    previewReplicaCount: 1
+    scaleDownDelaySeconds: -1
+  ##################################
+
+volume:
+  name: pv
+  mountPath: /var/lib/postgresql/data
+  accessModes: ReadWriteMany
+  capacity: 100Gi
+
+fsauth:
+  securityContextEnabled: false
+  securityContext: {
+    # runAsUser: 1000,
+    # runAsGroup: 3000,
+    fsGroup: 2000
+  }
+
+
+### MetaData 수정하지마세요. ###
+dev:
+ account: "476196624167"
+ podsg: "sg-01f482e18bef12a13"
+ albsg: "sg-01f482e18bef12a13"
+ commercial:
+   lbsubnet: "subnet-0443d06ab9ad49af8,subnet-0492ca1470b9cb19b,subnet-0c0e038418cd66651"
+prod:
+ account: "476196624167"
+ podsg: "sg-0f716033891db4065"
+ albsg: "sg-0f716033891db4065"
+ commercial:
+   lbsubnet: "subnet-0bcb411a2b003e7fc,subnet-00e6e034682fd740d"
