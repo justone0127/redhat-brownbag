@@ -1,0 +1,535 @@
+{{- if eq .Values.information.stage "dev" }}
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+  annotations:
+    "helm.sh/hook": pre-install
+spec:
+  podSelector:
+    matchLabels:
+      name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+  securityGroups:
+    groupIds:
+      - {{ .Values.dev.podsg }}
+---
+{{- else if  eq .Values.information.stage "test" }}
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+  annotations:
+    "helm.sh/hook": pre-install
+spec:
+  podSelector:
+    matchLabels:
+      name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+  securityGroups:
+    groupIds:
+      - {{ .Values.test.podsg }}
+---
+{{- else if  eq .Values.information.stage "prod" }}
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+  annotations:
+    "helm.sh/hook": pre-install
+spec:
+  podSelector:
+    matchLabels:
+      name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+  securityGroups:
+    groupIds:
+      - {{ .Values.prod.podsg }}
+---
+{{- end }}
+{{- if eq .Values.information.stage "dev" -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::{{ .Values.dev.account }}:role/eks-{{ .Values.information.application }}
+---
+{{- else if eq .Values.information.stage "test" -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::{{ .Values.stg.account }}:role/eks-{{ .Values.information.application }}
+---
+{{- else if eq .Values.information.stage "prod" -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::{{ .Values.prod.account }}:role/eks-{{ .Values.information.application }}
+---
+{{- end }}
+apiVersion: v1
+data:
+  stage: {{ .Values.information.stage }}
+  region: awsdc
+  TZ: Asia/Seoul
+{{- if .Values.modules.envdata }}
+{{ toYaml .Values.envdata | indent 2 }}
+{{- end }}
+kind: ConfigMap
+metadata:
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+---
+{{- if .Values.modules.autoscaling -}}
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+spec:
+  scaleTargetRef:
+    {{- if .Values.modules.bluegreen }}
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
+    {{- else }}
+    apiVersion: apps/v1
+    kind: Deployment
+    {{- end }}
+    name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  targetCPUUtilizationPercentage: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+---
+{{- end }}
+{{- if .Values.modules.bluegreen }}
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+{{- else }}
+apiVersion: apps/v1
+kind: Deployment
+{{- end }}
+metadata:
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+spec:
+  replicas: {{ .Values.containers.replicaCount}}
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+  template:
+    metadata:
+      labels:
+        name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+        data: "true"
+      annotations:
+        buildNum:  {{ .Values.release | quote }}
+    spec:
+      serviceAccountName: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+      {{- if .Values.fsauth.securityContextEnabled }}
+      securityContext:
+{{ toYaml .Values.fsauth.securityContext | indent 8 }}
+      {{- end }}
+      containers:
+{{- if eq .Values.information.stage "dev" }}
+        - image: {{ .Values.dev.account }}.dkr.ecr.ap-northeast-2.amazonaws.com/redhat-ecr-{{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}:{{ .Values.containers.imageTag }}
+{{- else if eq .Values.information.stage "test" }}
+        - image: {{ .Values.stg.account }}.dkr.ecr.us-east-1.amazonaws.com/redhat-ecr-{{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}:{{ .Values.containers.imageTag }}
+{{- else if eq .Values.information.stage "prod" }}
+        - image: {{ .Values.prod.account }}.dkr.ecr.us-east-1.amazonaws.com/redhat-ecr-{{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}:{{ .Values.containers.imageTag }}
+{{- end }}
+          name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+          imagePullPolicy: Always
+          ports:
+          - containerPort: {{.Values.containers.port}}
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+                  key: stage
+            - name: REACT_PROFILES_ACTIVE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+                  key: stage
+            - name: ACTIVE_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+                  key: region
+            - name: TZ
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+                  key: TZ
+            {{- if .Values.modules.envdata }}
+            {{- range $key, $value := .Values.envdata }}
+            - name: {{ $key }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $.Values.information.owner }}-{{ $.Values.information.stage }}-{{ $.Values.information.application }}-{{ $.Values.information.service }}
+                  key: {{ $key }}
+            {{- end }}
+            {{- end }}
+          resources:
+            requests:
+              memory: {{ .Values.containers.memory }}
+              cpu: {{ .Values.containers.cpu }}
+            limits:
+              memory: "{{ .Values.containers.memory }}"
+              cpu: "{{ .Values.containers.cpu }}"
+      {{- if .Values.healthcheck.http.enable}}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.healthcheck.http.livenessProbe.path }}
+              port: {{ .Values.containers.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            successThreshold: 1
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: {{ .Values.healthcheck.http.startupProbe.path }}
+              port: {{ .Values.containers.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            successThreshold: 1
+            failureThreshold: 10
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.healthcheck.http.readinessProbe.path }}
+              port: {{ .Values.containers.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            successThreshold: 1
+            failureThreshold: 3
+      {{- else if .Values.healthcheck.tcp.enable}}
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.containers.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            successThreshold: 1
+            failureThreshold: 3
+          startupProbe:
+            tcpSocket:
+              port: {{ .Values.containers.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            successThreshold: 1
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.containers.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            successThreshold: 1
+            failureThreshold: 10
+      {{- end }}
+      {{- if .Values.modules.volume}}
+          volumeMounts:
+          - name: {{ .Values.volume.name }}
+            mountPath: {{ .Values.volume.mountPath }}
+      volumes:
+      - name: {{ .Values.volume.name }}
+        persistentVolumeClaim:
+          claimName: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+      {{- end }}
+{{- if .Values.modules.bluegreen }}
+  strategy:
+    # ----- Everything above this comment are the same as a deployment -----
+    blueGreen: # A new field for the Blue Green strategy options
+      activeService: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }} # Reference to a service
+      previewService: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}-preview # Reference to a service
+      autoPromotionEnabled: {{.Values.deploy.strategy.autoPromotionEnabled}}   #autoPromotioEnabled 옵션은 Blue/Green 배포를 자동으로 진행할 것인지 여부. false 옵션을 사용해 수동으로 지정
+      previewReplicaCount: {{.Values.deploy.strategy.previewReplicaCount}}
+      scaleDownDelaySeconds: {{.Values.deploy.strategy.scaleDownDelaySeconds}} #전환후 이전 active pod 삭제 대기 시간
+      scaleDownDelayRevisionLimit: 1
+{{- end }}
+---
+{{- if .Values.modules.volume -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+spec:
+  accessModes:
+    - {{ .Values.volume.accessModes }}
+  storageClassName: ""
+  resources:
+    requests:
+      storage: {{ .Values.volume.capacity }}
+---
+{{- end }}
+{{- if and (.Values.modules.service) (not .Values.modules.ingress) (not .Values.modules.nlb) -}}
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+spec:
+  ports:
+    - name: portname
+      port: {{.Values.service.port}}
+      protocol: TCP
+      targetPort: {{.Values.containers.port}}
+  selector:
+    name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+  type: ClusterIP
+---
+{{- if .Values.modules.bluegreen -}}
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}-preview
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}-preview
+spec:
+  ports:
+    - name: portname
+      port: {{.Values.service.port}}
+      protocol: TCP
+      targetPort: {{.Values.containers.port}}
+  selector:
+    name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+  type: ClusterIP
+---
+{{- end }}
+{{- end }}
+{{- if .Values.modules.ingress -}}
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+spec:
+  ports:
+    - name: http
+      port: {{.Values.containers.port}}
+      protocol: TCP
+      targetPort: {{.Values.containers.port}}
+  selector:
+    name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}-preview
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}-preview
+spec:
+  ports:
+    - name: http
+      port: {{.Values.containers.port}}
+      protocol: TCP
+      targetPort: {{.Values.containers.port}}
+  selector:
+    name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+  type: ClusterIP
+---
+{{- end }}
+{{- if .Values.modules.ingress -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}-service
+  annotations:
+{{- if eq .Values.information.stage "prod" }}
+    alb.ingress.kubernetes.io/load-balancer-name: redhat-alb-{{ .Values.information.owner }}-{{ .Values.information.application }}
+    alb.ingress.kubernetes.io/group.name: redhat-alb-{{ .Values.information.owner }}-{{ .Values.information.application }}
+{{- else }}
+    alb.ingress.kubernetes.io/load-balancer-name: redhat-alb-{{ .Values.information.owner }}-{{ .Values.information.application }}
+    alb.ingress.kubernetes.io/group.name: redhat-alb-{{ .Values.information.owner }}-{{ .Values.information.application }}
+{{- end }}
+{{- if eq .Values.information.stage "dev" }}
+    alb.ingress.kubernetes.io/security-groups: {{ .Values.dev.albsg }}
+{{- else if eq .Values.information.stage "test" }}
+    alb.ingress.kubernetes.io/security-groups: {{ .Values.test.albsg }}
+{{- else if eq .Values.information.stage "prod" }}
+    alb.ingress.kubernetes.io/security-groups: {{ .Values.prod.albsg }}
+{{- end }}
+{{- if and (eq .Values.information.stage "dev") (eq .Values.information.owner "commercial") }}
+    alb.ingress.kubernetes.io/subnets: {{ .Values.dev.commercial.lbsubnet }}
+{{- else if and (eq .Values.information.stage "dev") (eq .Values.information.owner "test") }}
+    alb.ingress.kubernetes.io/subnets: {{ .Values.dev.test.lbsubnet }}
+{{- else if and (eq .Values.information.stage "test") (eq .Values.information.owner "commercial") }}
+    alb.ingress.kubernetes.io/subnets: {{ .Values.test.commercial.lbsubnet }}
+{{- else if and (eq .Values.information.stage "test") (eq .Values.information.owner "test") }}
+    alb.ingress.kubernetes.io/subnets: {{ .Values.test.test.lbsubnet }}
+{{- else if and (eq .Values.information.stage "prod") (eq .Values.information.owner "commercial") }}
+    alb.ingress.kubernetes.io/subnets: {{ .Values.prod.commercial.lbsubnet }}
+{{- else if and (eq .Values.information.stage "prod") (eq .Values.information.owner "test") }}
+    alb.ingress.kubernetes.io/subnets: {{ .Values.prod.test.lbsubnet }}
+{{- end }}
+{{- if and (.Values.ingress.type.default.enable) (eq .Values.information.stage "dev") }}
+    alb.ingress.kubernetes.io/ssl-redirect: "443"   
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/target-type: "ip"
+{{- else if and (.Values.ingress.type.default.enable) (eq .Values.information.stage "prod") }}
+    alb.ingress.kubernetes.io/ssl-redirect: "443"   
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/target-type: "ip"
+{{- end }}
+    alb.ingress.kubernetes.io/healthcheck-path: {{ .Values.healthcheck.http.livenessProbe.path }}
+    alb.ingress.kubernetes.io/success-codes: 200-499
+    alb.ingress.kubernetes.io/scheme: internet-facing
+{{- if eq .Values.information.stage "prod" }}
+    alb.ingress.kubernetes.io/tags: Shared=N
+{{- else }}
+    alb.ingress.kubernetes.io/tags: Shared=N
+{{- end }}
+spec:
+  ingressClassName: alb
+  rules:
+    - host: {{ .Values.information.url }}
+      http:
+        paths:
+          - path: {{ .Values.ingress.blueHosts.path }}
+            pathType: Prefix
+            backend:
+              service:
+                name:  {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+                port:
+                  number: {{.Values.containers.port}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}-preview
+  annotations:
+{{- if eq .Values.information.stage "prod" }}
+    alb.ingress.kubernetes.io/load-balancer-name: redhat-alb-{{ .Values.information.owner }}-{{ .Values.information.application }}
+    alb.ingress.kubernetes.io/group.name: redhat-alb-{{ .Values.information.owner }}-{{ .Values.information.application }}
+{{- else }}
+    alb.ingress.kubernetes.io/load-balancer-name: redhat-alb-{{ .Values.information.owner }}-{{ .Values.information.application }}
+    alb.ingress.kubernetes.io/group.name: redhat-alb-{{ .Values.information.owner }}-{{ .Values.information.application }}
+{{- end }}
+{{- if eq .Values.information.stage "dev" }}
+    alb.ingress.kubernetes.io/security-groups: {{ .Values.dev.albsg }}
+{{- else if eq .Values.information.stage "test" }}
+    alb.ingress.kubernetes.io/security-groups: {{ .Values.test.albsg }}
+{{- else if eq .Values.information.stage "prod" }}
+    alb.ingress.kubernetes.io/security-groups: {{ .Values.prod.albsg }}
+{{- end }}
+{{- if and (eq .Values.information.stage "dev") (eq .Values.information.owner "commercial") }}
+    alb.ingress.kubernetes.io/subnets: {{ .Values.dev.commercial.lbsubnet }}
+{{- else if and (eq .Values.information.stage "dev") (eq .Values.information.owner "test") }}
+    alb.ingress.kubernetes.io/subnets: {{ .Values.dev.test.lbsubnet }}
+{{- else if and (eq .Values.information.stage "test") (eq .Values.information.owner "commercial") }}
+    alb.ingress.kubernetes.io/subnets: {{ .Values.test.commercial.lbsubnet }}
+{{- else if and (eq .Values.information.stage "test") (eq .Values.information.owner "test") }}
+    alb.ingress.kubernetes.io/subnets: {{ .Values.test.test.lbsubnet }}
+{{- else if and (eq .Values.information.stage "prod") (eq .Values.information.owner "commercial") }}
+    alb.ingress.kubernetes.io/subnets: {{ .Values.prod.commercial.lbsubnet }}
+{{- else if and (eq .Values.information.stage "prod") (eq .Values.information.owner "test") }}
+    alb.ingress.kubernetes.io/subnets: {{ .Values.prod.test.lbsubnet }}
+{{- end }}
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":7081}]'
+    alb.ingress.kubernetes.io/target-type: "ip"
+    alb.ingress.kubernetes.io/healthcheck-path: {{ .Values.healthcheck.http.livenessProbe.path }}
+    alb.ingress.kubernetes.io/success-codes: 200-499
+{{- if eq .Values.information.stage "prod" }}
+    alb.ingress.kubernetes.io/tags: Shared=N
+{{- else }}
+    alb.ingress.kubernetes.io/tags: Shared=N
+{{- end }}
+    link.argocd.argoproj.io/external-link: https://{{ .Values.information.url }}:7081
+spec:
+  ingressClassName: alb
+  rules:
+    - host: {{ .Values.information.url }}
+      http:
+        paths:
+          - path: {{ .Values.ingress.greenHosts.path }}
+            pathType: Prefix
+            backend:
+              service:
+                name:  {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}-preview
+                port:
+                  number: {{.Values.containers.port}}
+---
+{{- end }}
+{{- if .Values.modules.nlb -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}
+  annotations:
+{{- if eq .Values.information.stage "prod" }}
+    service.beta.kubernetes.io/aws-load-balancer-name: redhat-nlb-{{ .Values.information.owner }}-{{ .Values.information.application }}
+{{- else }}
+    service.beta.kubernetes.io/aws-load-balancer-name: redhat-nlb-{{ .Values.information.owner }}-{{ .Values.information.application }}
+{{- end }}
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb-ip"
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+    service.beta.kubernetes.io/aws-load-balancer-ssl-ports: {{.Values.nlb.bluePort | quote }}
+{{- if eq .Values.information.stage "prod" }}
+    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: Shared=N
+{{- else }}
+    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: Shared=N
+{{- end }}
+{{- if and (eq .Values.information.stage "dev") (eq .Values.information.owner "commercial") }}
+    service.beta.kubernetes.io/aws-load-balancer-subnets: {{ .Values.dev.commercial.lbsubnet }}
+{{- else if and (eq .Values.information.stage "dev") (eq .Values.information.owner "test") }}
+    service.beta.kubernetes.io/aws-load-balancer-subnets: {{ .Values.dev.test.lbsubnet }}
+{{- else if and (eq .Values.information.stage "test") (eq .Values.information.owner "commercial") }}
+    service.beta.kubernetes.io/aws-load-balancer-subnets: {{ .Values.test.commercial.lbsubnet }}
+{{- else if and (eq .Values.information.stage "test") (eq .Values.information.owner "test") }}
+    service.beta.kubernetes.io/aws-load-balancer-subnets: {{ .Values.test.test.lbsubnet }}
+{{- else if and (eq .Values.information.stage "prod") (eq .Values.information.owner "commercial") }}
+    service.beta.kubernetes.io/aws-load-balancer-subnets: {{ .Values.prod.commercial.lbsubnet }}
+{{- else if and (eq .Values.information.stage "prod") (eq .Values.information.owner "test") }}
+    service.beta.kubernetes.io/aws-load-balancer-subnets: {{ .Values.prod.test.lbsubnet }}
+{{- end }}
+spec:
+  ports:
+    - port: {{.Values.nlb.bluePort}}
+      protocol: TCP
+      targetPort: {{.Values.containers.port}}
+  type: LoadBalancer
+  selector:
+    name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-preview
+  annotations:
+{{- if eq .Values.information.stage "prod" }}
+    service.beta.kubernetes.io/aws-load-balancer-name: redhat-nlb-{{ .Values.information.owner }}-{{ .Values.information.application }}
+{{- else }}
+    service.beta.kubernetes.io/aws-load-balancer-name: redhat-nlb-{{ .Values.information.owner }}-{{ .Values.information.application }}
+{{- end }}
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb-ip"
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+    service.beta.kubernetes.io/aws-load-balancer-ssl-ports: {{.Values.nlb.greenPort | quote }}
+{{- if eq .Values.information.stage "prod" }}
+    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: Shared=N
+{{- else }}
+    service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: Shared=N
+{{- end }}
+{{- if and (eq .Values.information.stage "dev") (eq .Values.information.owner "commercial") }}
+    service.beta.kubernetes.io/aws-load-balancer-subnets: {{ .Values.dev.commercial.lbsubnet }}
+{{- else if and (eq .Values.information.stage "dev") (eq .Values.information.owner "test") }}
+    service.beta.kubernetes.io/aws-load-balancer-subnets: {{ .Values.dev.test.lbsubnet }}
+{{- else if and (eq .Values.information.stage "test") (eq .Values.information.owner "commercial") }}
+    service.beta.kubernetes.io/aws-load-balancer-subnets: {{ .Values.stg.commercial.lbsubnet }}
+{{- else if and (eq .Values.information.stage "test") (eq .Values.information.owner "test") }}
+    service.beta.kubernetes.io/aws-load-balancer-subnets: {{ .Values.test.test.lbsubnet }}
+{{- else if and (eq .Values.information.stage "prod") (eq .Values.information.owner "commercial") }}
+    service.beta.kubernetes.io/aws-load-balancer-subnets: {{ .Values.prod.commercial.lbsubnet }}
+{{- else if and (eq .Values.information.stage "prod") (eq .Values.information.owner "test") }}
+    service.beta.kubernetes.io/aws-load-balancer-subnets: {{ .Values.prod.test.lbsubnet }}
+{{- end }}
+spec:
+  ports:
+    - port: {{.Values.nlb.greenPort}}
+      protocol: TCP
+      targetPort: {{.Values.containers.port}}
+  type: LoadBalancer
+  selector:
+    name: {{ .Values.information.owner }}-{{ .Values.information.stage }}-{{ .Values.information.application }}-{{ .Values.information.service }}
+{{- end }}
